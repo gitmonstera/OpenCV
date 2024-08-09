@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Capture</title>
+    <script>
+        function updateImage() {
+            fetch('/image')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('screen-image').src = 'data:image/jpeg;base64,' + data.img_data;
+                })
+                .catch(error => console.error('Error fetching image:', error));
+        }
+
+        // Обновляем изображение каждые 5 секунд
+        setInterval(updateImage, 1000);
+
+        // Обновляем изображение при первой загрузке страницы
+        window.onload = updateImage;
+    </script>
+</head>
+<body>
+    <h1>Screen Capture with Yellow Object Detection</h1>
+    <img id="screen-image" src="" alt="Processed Image">
+</body>
+</html>
