@@ -11,6 +11,23 @@ from time import sleep
 
 app = Flask(__name__)
 
+
+def angle_between_rects(rect1, rect2):
+    """ Функция для вычисления угла между двумя прямоугольниками """
+    angle1 = rect1[2]
+    angle2 = rect2[2]
+
+    # Нормализуем углы в диапазоне [0, 180]
+    angle1 = angle1 % 180
+    angle2 = angle2 % 180
+
+    # Вычисляем разницу между углами
+    angle_diff = abs(angle1 - angle2)
+    if angle_diff > 90:
+        angle_diff = 180 - angle_diff
+
+    return angle_diff
+
 def capture_and_process_screen():
     # Создаем объект для захвата экрана
     with mss.mss() as sct:
@@ -24,25 +41,38 @@ def capture_and_process_screen():
         # Конвертация изображения из BGR в HSV
         hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        # Определение расширенного диапазона для желтого цвета
+        # Определение расширенного диапазона для белого цвета
         low_yellow = np.array([0, 0, 200])
         high_yellow = np.array([35, 255, 255])
 
         # Применение маски для выделения заданного цветового диапазона
         img_tmp = cv2.inRange(hsv_img, low_yellow, high_yellow)
 
-        # Поиск контуров желтых объектов
+        # Поиск контуров белых объектов
         contours, _ = cv2.findContours(img_tmp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        rectangles = []
 
         # Рисование прямоугольников вокруг найденных объектов
         for contour in contours:
             area = cv2.contourArea(contour)
             if area > 800:  # Фильтр по площади
-                # keyboard.press("w")
-                # sleep(1)
-                # keyboard.release("w")
-                x, y, w, h = cv2.boundingRect(contour)
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)  # Зеленый прямоугольник
+                rect = cv2.minAreaRect(contour)
+                rectangles.append(rect)
+
+
+        for i, rect1 in enumerate(rectangles):
+            for j, rect2 in enumerate(rectangles):
+                if i != j:
+                    angle_diff = angle_between_rects(rect1, rect2)
+                    if angle_diff < 5:
+                        box1 = cv2.boxPoints(rect1).astype(int)
+                        box2 = cv2.boxPoints(rect2).astype(int)
+                        print("forward")
+                        cv2.drawContours(img, [box1], 0, (0, 255, 0), 2)  # Зеленый прямоугольник
+                        cv2.drawContours(img, [box2], 0, (0, 0, 222), 2)  # Красный прямоугольник
+                    else:
+                        print("stop")
 
         # Конвертируем изображение в формат, подходящий для передачи на веб-страницу
         pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -50,8 +80,8 @@ def capture_and_process_screen():
         pil_img.save(buff, format="JPEG")
         img_str = base64.b64encode(buff.getvalue()).decode("utf-8")
 
-
         return img_str
+
 
 @app.route('/')
 def index():
