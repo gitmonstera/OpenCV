@@ -45,13 +45,20 @@ def capture_and_process_screen():
         low_yellow = np.array([0, 0, 200])
         high_yellow = np.array([35, 255, 255])
 
+        lower_blue = np.array([100, 100, 100])
+        upper_blue = np.array([130, 255, 255])
+
         # Применение маски для выделения заданного цветового диапазона
         img_tmp = cv2.inRange(hsv_img, low_yellow, high_yellow)
 
+        img_tmp_car = cv2.inRange(hsv_img, lower_blue, upper_blue)
+
         # Поиск контуров белых объектов
         contours, _ = cv2.findContours(img_tmp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours1, _ = cv2.findContours(img_tmp_car, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         rectangles = []
+        car_rectangles = []
 
         # Рисование прямоугольников вокруг найденных объектов
         for contour in contours:
@@ -59,6 +66,14 @@ def capture_and_process_screen():
             if area > 800:  # Фильтр по площади
                 rect = cv2.minAreaRect(contour)
                 rectangles.append(rect)
+
+        for contour in contours1:
+            area = cv2.contourArea(contour)
+            if area > 800:  # Фильтр по площади
+                rect = cv2.minAreaRect(contour)
+                car_rectangles.append(rect)
+                box = cv2.boxPoints(rect).astype(int)
+                cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
 
 
         for i, rect1 in enumerate(rectangles):
@@ -68,9 +83,28 @@ def capture_and_process_screen():
                     if angle_diff < 5:
                         box1 = cv2.boxPoints(rect1).astype(int)
                         box2 = cv2.boxPoints(rect2).astype(int)
-                        print("forward")
-                        cv2.drawContours(img, [box1], 0, (0, 255, 0), 2)  # Зеленый прямоугольник
-                        cv2.drawContours(img, [box2], 0, (0, 0, 222), 2)  # Красный прямоугольник
+
+                        # Проверка пересичения синего прямоугольника с остальными
+                        for car_rect in car_rectangles:
+                            car_box = cv2.boxPoints(car_rect).astype(int)
+                            intersection_type, intersection_point = cv2.rotatedRectangleIntersection(rect1, car_rect)
+                            if intersection_type != cv2.INTERSECT_NONE:
+                                print("Синий прямоугольник пересекается с одним из параллельных зеленых")
+                                cv2.putText(img, "YES", (car_box[0][0], car_box[0][1] - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+                        # print("forward")
+                        x1, y1, width1, height1 = cv2.boundingRect(box1)
+                        x2, y2, width2, height2 = cv2.boundingRect(box2)
+                        if (width1 and width2) >= 5 and (height1 and height2) >= 50:
+
+                            print(f"Ширина: {width1}, Высота: {height1}")
+                            cv2.drawContours(img, [box1], 0, (0, 255, 0), 2)  # Зеленый прямоугольник
+                            cv2.putText(img, f'W:{width1} H:{height1}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+                            print(f"Ширина: {width2}, Высота: {height2}")
+                            cv2.drawContours(img, [box2], 0, (0, 0, 222), 2)  # Красный прямоугольник
+                            cv2.putText(img, f'W:{width2} H:{height2}', (x2, y2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 222), 2)
                     else:
                         print("stop")
 
