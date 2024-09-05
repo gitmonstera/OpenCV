@@ -5,7 +5,7 @@ import math
 
 
 class handDetector():
-	def __init__(self, mode=False, maxHands=2, modelComplexity=1, detectionCon=0.5, trackCon=0.5):
+	def __init__(self, mode=False, maxHands=5, modelComplexity=1, detectionCon=0.5, trackCon=0.5):
 		self.mode = mode
 		self.maxHands = maxHands
 		self.modelComplexity = modelComplexity
