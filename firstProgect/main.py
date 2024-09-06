@@ -1,135 +1,117 @@
-from flask import Flask, render_template, jsonify
 import cv2
-import numpy as np
-import mss
-import base64
-from io import BytesIO
-from PIL import Image
-
-import keyboard
-from time import sleep
-
-app = Flask(__name__)
+import mediapipe as mp
+import time
+import math
 
 
-def angle_between_rects(rect1, rect2):
-    """ Функция для вычисления угла между двумя прямоугольниками """
-    angle1 = rect1[2]
-    angle2 = rect2[2]
+class handDetector():
+    def __init__(self, mode=False, maxHands=2, modelComplexity=1, detectionCon=0.5, trackCon=0.5):
+        self.mode = mode
+        self.maxHands = maxHands
+        self.modelComplexity = modelComplexity
+        self.detectionCon = detectionCon
+        self.trackCon = trackCon
 
-    # Нормализуем углы в диапазоне [0, 180]
-    angle1 = angle1 % 180
-    angle2 = angle2 % 180
+        self.mpHands = mp.solutions.hands
+        self.hands = self.mpHands.Hands(self.mode, self.maxHands, self.modelComplexity, self.detectionCon,
+                                        self.trackCon)
+        self.mpDraw = mp.solutions.drawing_utils
+        self.tipIds = [4, 8, 12, 16, 20]  # Индексы кончиков пальцев
 
-    # Вычисляем разницу между углами
-    angle_diff = abs(angle1 - angle2)
-    if angle_diff > 90:
-        angle_diff = 180 - angle_diff
+    def findHands(self, img, draw=True):
+        imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        self.results = self.hands.process(imgRGB)
 
-    return angle_diff
+        if self.results.multi_hand_landmarks:
+            for handLms in self.results.multi_hand_landmarks:
+                if draw:
+                    self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
+        return img
 
-def capture_and_process_screen():
-    # Создаем объект для захвата экрана
-    with mss.mss() as sct:
-        monitor = sct.monitors[1]
-        screenshot = sct.grab(monitor)
+    def findPosition(self, img, handNo=0, draw=True):
+        xList = []
+        yList = []
+        bbox = []
+        self.lmList = []
+        if self.results.multi_hand_landmarks:
+            myHand = self.results.multi_hand_landmarks[handNo]
+            for id, lm in enumerate(myHand.landmark):
+                h, w, c = img.shape
+                cx, cy = int(lm.x * w), int(lm.y * h)
+                xList.append(cx)
+                yList.append(cy)
+                self.lmList.append([id, cx, cy])
+                if draw:
+                    cv2.circle(img, (cx, cy), 5, (255, 0, 255), cv2.FILLED)
+            xmin, xmax = min(xList), max(xList)
+            ymin, ymax = min(yList), max(yList)
+            bbox = xmin, ymin, xmax, ymax
 
-        # Конвертируем изображение в формат, поддерживаемый OpenCV
-        img = np.array(screenshot)
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            if draw:
+                cv2.rectangle(img, (bbox[0] - 20, bbox[1] - 20), (bbox[2] + 20, bbox[3] + 20), (0, 255, 0), 2)
+        return self.lmList, bbox
 
-        # Конвертация изображения из BGR в HSV
-        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    def findDistance(self, p1, p2, img, draw=True):
+        x1, y1 = self.lmList[p1][1], self.lmList[p1][2]
+        x2, y2 = self.lmList[p2][1], self.lmList[p2][2]
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-        # Определение расширенного диапазона для белого цвета
-        low_yellow = np.array([0, 0, 200])
-        high_yellow = np.array([35, 255, 255])
+        if draw:
+            cv2.circle(img, (x1, y1), 15, (255, 0, 255), cv2.FILLED)
+            cv2.circle(img, (x2, y2), 15, (255, 0, 255), cv2.FILLED)
+            cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
+            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
 
-        lower_blue = np.array([100, 100, 100])
-        upper_blue = np.array([130, 255, 255])
-
-        # Применение маски для выделения заданного цветового диапазона
-        img_tmp = cv2.inRange(hsv_img, low_yellow, high_yellow)
-
-        img_tmp_car = cv2.inRange(hsv_img, lower_blue, upper_blue)
-
-        # Поиск контуров белых объектов
-        contours, _ = cv2.findContours(img_tmp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours1, _ = cv2.findContours(img_tmp_car, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        rectangles = []
-        car_rectangles = []
-
-        # Рисование прямоугольников вокруг найденных объектов
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > 800:  # Фильтр по площади
-                rect = cv2.minAreaRect(contour)
-                rectangles.append(rect)
-
-        for contour in contours1:
-            area = cv2.contourArea(contour)
-            if area > 800:  # Фильтр по площади
-                rect = cv2.minAreaRect(contour)
-                car_rectangles.append(rect)
-                box = cv2.boxPoints(rect).astype(int)
-                cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
+        length = math.hypot(x2 - x1, y2 - y1)
+        return length, img, [x1, y1, x2, y2, cx, cy]
 
 
-        for i, rect1 in enumerate(rectangles):
-            for j, rect2 in enumerate(rectangles):
-                if i != j:
-                    angle_diff = angle_between_rects(rect1, rect2)
-                    if angle_diff < 5:
-                        box1 = cv2.boxPoints(rect1).astype(int)
-                        box2 = cv2.boxPoints(rect2).astype(int)
+def main():
+    pTime = 0
+    cTime = 0
+    cap = cv2.VideoCapture(0)
+    detector = handDetector()
 
-                        # Проверка пересичения синего прямоугольника с остальными
-                        for car_rect in car_rectangles:
-                            car_box = cv2.boxPoints(car_rect).astype(int)
-                            intersection_type, intersection_point = cv2.rotatedRectangleIntersection(rect1, car_rect)
-                            if intersection_type != cv2.INTERSECT_NONE:
-                                print("Синий прямоугольник пересекается с одним из параллельных зеленых")
-                                cv2.putText(img, "YES", (car_box[0][0], car_box[0][1] - 10),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    # Координаты шарика и его радиус
+    ballX, ballY = 300, 300
+    ballRadius = 30
+    ballSelected = False  # Флаг, фиксирует, "выбран" ли шарик
 
-                        # print("forward")
-                        x1, y1, width1, height1 = cv2.boundingRect(box1)
-                        x2, y2, width2, height2 = cv2.boundingRect(box2)
-                        if (width1 and width2) >= 5 and (height1 and height2) >= 50:
+    while True:
+        success, img = cap.read()
+        img = cv2.flip(img, 1)
+        img = detector.findHands(img)
+        lmList, _ = detector.findPosition(img)
 
-                            print(f"Ширина: {width1}, Высота: {height1}")
-                            cv2.drawContours(img, [box1], 0, (0, 255, 0), 2)  # Зеленый прямоугольник
-                            cv2.putText(img, f'W:{width1} H:{height1}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        if len(lmList) != 0:
+            # Находим расстояние между большим (id=4) и указательным (id=8) пальцами
+            length, img, lineInfo = detector.findDistance(4, 8, img)
 
-                            print(f"Ширина: {width2}, Высота: {height2}")
-                            cv2.drawContours(img, [box2], 0, (0, 0, 222), 2)  # Красный прямоугольник
-                            cv2.putText(img, f'W:{width2} H:{height2}', (x2, y2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 222), 2)
-                    else:
-                        print("stop")
+            # Центр между большим и указательным пальцами
+            cx, cy = lineInfo[4], lineInfo[5]
 
-        # Конвертируем изображение в формат, подходящий для передачи на веб-страницу
-        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        buff = BytesIO()
-        pil_img.save(buff, format="JPEG")
-        img_str = base64.b64encode(buff.getvalue()).decode("utf-8")
+            # Проверяем, соприкасаются ли пальцы друг с другом и находятся ли они внутри радиуса шарика
+            if length < 40 and math.hypot(cx - ballX, cy - ballY) < ballRadius:
+                ballSelected = True  # Шарик "выбран"
+            else:
+                ballSelected = False  # Шарик "отпущен"
 
-        return img_str
+            # Если шарик "выбран", перемещаем его к позиции указательного пальца
+            if ballSelected:
+                ballX, ballY = lmList[8][1], lmList[8][2]
 
+        # Отображение шарика
+        cv2.circle(img, (ballX, ballY), ballRadius, (0, 0, 255), cv2.FILLED)
 
-@app.route('/')
-def index():
-    img_data = capture_and_process_screen()
-    return render_template('index.html', img_data=img_data)
+        # Расчет FPS
+        cTime = time.time()
+        fps = 1. / (cTime - pTime)
+        pTime = cTime
 
+        cv2.putText(img, str(int(fps)), (10, 70), cv2.FONT_HERSHEY_PLAIN, 3, (255, 0, 255), 3)
 
-@app.route('/image')
-def image():
-    img_data = capture_and_process_screen()
-    return jsonify({'img_data': img_data})
+        cv2.imshow("Image", img)
+        cv2.waitKey(1)
 
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=7654, debug=True)
-
-
+if __name__ == "__main__":
+        main()
